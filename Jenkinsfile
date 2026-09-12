@@ -1,4 +1,87 @@
-steps {
+pipeline {
+    agent any
+
+    options {
+        timeout(time: 45, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '20'))
+        disableConcurrentBuilds()
+    }
+
+    environment {
+        REGISTRY_CRED_ID = 'dockerhub-credentials'
+        DOCKER_HUB_USER  = 'your_dockerhub_username'
+        PROJECT_NAME     = 'devops_project'
+        IMAGE_NAME       = "${DOCKER_HUB_USER}/${PROJECT_NAME}"
+        BUILD_TAG        = "${BUILD_NUMBER}-${GIT_COMMIT.take(7)}"
+    }
+
+    stages {
+        stage('Code Hygiene & Static Analysis') {
+            steps {
+                dir('app') {
+                    sh '''
+                        python3 -m venv .venv
+                        . .venv/bin/activate
+                        pip install --upgrade pip
+                        pip install -r requirements.txt
+
+                        echo "[*] Running Bandit Security Linter..."
+                        pip install bandit
+                        bandit -r . -f txt -o bandit-report.txt || true
+
+                        deactivate
+                    '''
+                }
+            }
+        }
+
+        stage('Automated Unit & Integration Testing') {
+            steps {
+                dir('app') {
+                    sh '''
+                        . .venv/bin/activate
+                        export PYTHONPATH=$PYTHONPATH:.
+                        pip install pytest pytest-cov
+                        mkdir -p test-reports
+                        pytest test_app.py -v --junitxml=test-reports/results.xml --cov=. || true
+                        deactivate
+                    '''
+                }
+            }
+            post {
+                always {
+                    junit allowEmptyResults: true, testResults: 'app/test-reports/results.xml'
+                }
+            }
+        }
+
+        stage('Build Hardened OCI Image') {
+            steps {
+                sh '''
+                    docker build -t ${IMAGE_NAME}:${BUILD_TAG} -t ${IMAGE_NAME}:latest .
+                '''
+            }
+        }
+
+        stage('Publish Artifacts to Docker Registry') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: "${REGISTRY_CRED_ID}", usernameVariable: 'DOCKER_USER', passwordVariable: 'DOCKER_PASS')]) {
+                    sh '''
+                        echo "$DOCKER_PASS" | docker login -u "$DOCKER_USER" --password-stdin
+                        docker push ${IMAGE_NAME}:${BUILD_TAG}
+                        docker push ${IMAGE_NAME}:latest
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}steps {
             dir('app') {
                 sh '''
                     python3 -m venv .venv
