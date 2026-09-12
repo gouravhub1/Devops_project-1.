@@ -18,15 +18,17 @@ pipeline {
     stages {
         stage('Code Hygiene & Static Analysis') {
             steps {
+               steps {
+            dir('app') {
                 sh '''
                     python3 -m venv .venv
                     . .venv/bin/activate
                     pip install --upgrade pip
-                    pip install -r app/requirements.txt
-                    
-                    echo "[+] Running Bandit Security Linter..."
-                    bandit -r app/ -f txt
-                    
+                    pip install -r requirements.txt
+
+                    echo "[*] Running Bandit Security Linter..."
+                    bandit -r . -f txt
+
                     deactivate
                 '''
             }
