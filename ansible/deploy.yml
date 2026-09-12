@@ -1,0 +1,77 @@
+---
+- name: Enterprise Blue-Green Zero-Downtime Deployment
+  hosts: production_nodes
+  become: true
+  vars:
+    image_name: "{{ TARGET_IMAGE | mandatory }}"
+    service_name: "core_microservice"
+    active_port: 5000
+    green_staging_port: 5001
+
+  tasks:
+    - name: Ensure dependencies are installed
+      ansible.builtin.apt:
+        name:
+          - python3-docker
+          - curl
+        state: present
+        update_cache: false
+
+    - name: Pull Target Image
+      community.docker.docker_image:
+        name: "{{ image_name }}"
+        source: pull
+        force_source: true
+
+    - name: Run Staging Green Container
+      community.docker.docker_container:
+        name: "{{ service_name }}_green"
+        image: "{{ image_name }}"
+        state: started
+        restart_policy: always
+        ports:
+          - "{{ green_staging_port }}:5000"
+        env:
+          APP_ENV: "production"
+
+    - name: Validate Staging Container Readiness
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ green_staging_port }}/health/readiness"
+        method: GET
+        status_code: 200
+      register: health_check
+      retries: 10
+      delay: 3
+      until: health_check.status == 200
+
+    - name: Stop Older Blue Container
+      community.docker.docker_container:
+        name: "{{ service_name }}_blue"
+        state: absent
+
+    - name: Remove Temporary Green Container
+      community.docker.docker_container:
+        name: "{{ service_name }}_green"
+        state: absent
+
+    - name: Promote Target Image to Production Port
+      community.docker.docker_container:
+        name: "{{ service_name }}_blue"
+        image: "{{ image_name }}"
+        state: started
+        restart_policy: always
+        ports:
+          - "{{ active_port }}:5000"
+        env:
+          APP_ENV: "production"
+
+    - name: Final Production Smoke Verification
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ active_port }}/"
+        method: GET
+        status_code: 200
+      register: prod_smoke_check
+
+    - name: Deployment Success Log
+      ansible.builtin.debug:
+        msg: "Application successfully updated to {{ image_name }} on port {{ active_port }}. Payload: {{ prod_smoke_check.json }}"
