@@ -39,7 +39,7 @@ jobs:
       with:
         host: ${{ secrets.SERVERHOST }}
         username: ${{ secrets.SERVERUSER }}
-        key: ${{ secrets.DOCKER_GOURAV }}
+        key: ${{ secrets.DEVOPS_GOURAV }}
         script: |
           docker pull ${{ secrets.DOCKERUSERNAME }}/myapp:latest
           docker stop devops_project-web-1 || true
